@@ -26,7 +26,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 4. Build Android project from scratch ─────────────────────────────────
+      # ── 4. Create Android project structure ─────────────────────────────────
       - name: Create Android project structure
         run: |
           mkdir -p FuratApp/app/src/main/java/com/furattv/app
@@ -51,7 +51,6 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.furattv.app">
 
-              <!-- Internet permissions -->
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -292,25 +291,33 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-      # ── 14. Setup Gradle ──────────────────────────────────────────────────────
+      # ── 14. Create gradle.properties (FIX FOR ANDROIDX) ───────────────────────
+      - name: Create gradle.properties
+        run: |
+          cat > FuratApp/gradle.properties << 'EOF'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
+
+      # ── 15. Setup Gradle ──────────────────────────────────────────────────────
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
 
-      # ── 15. Build APK ─────────────────────────────────────────────────────────
+      # ── 16. Build APK ─────────────────────────────────────────────────────────
       - name: Build Debug APK
         working-directory: FuratApp
         run: gradle assembleDebug --no-daemon --stacktrace
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
-      # ── 16. Rename APK ────────────────────────────────────────────────────────
+      # ── 17. Rename APK ────────────────────────────────────────────────────────
       - name: Rename APK
         run: |
           cp FuratApp/app/build/outputs/apk/debug/app-debug.apk FuratTV-v1.0.apk
 
-      # ── 17. Upload artifact ───────────────────────────────────────────────────
+      # ── 18. Upload artifact ───────────────────────────────────────────────────
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -318,7 +325,7 @@ jobs:
           path: FuratTV-v1.0.apk
           retention-days: 30
 
-      # ── 18. Release on tag ────────────────────────────────────────────────────
+      # ── 19. Release on tag ────────────────────────────────────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -328,8 +335,5 @@ jobs:
           body: |
             ## FuratTV - إصدار ${{ github.ref_name }}
             تم بناء هذا الإصدار تلقائياً عبر GitHub Actions.
-            - دعم كامل للإنترنت HTTP/HTTPS
-            - دعم تشغيل الوسائط والـ IPTV
-            - دعم JavaScript كامل
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
