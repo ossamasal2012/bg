@@ -10,103 +10,326 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Node.js ───────────────────────────────────────────────────────────
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # ── 3. Java (required by Android SDK) ────────────────────────────────────
+      # ── 2. Java 17 ───────────────────────────────────────────────────────────
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # ── 4. Install Capacitor + dependencies ──────────────────────────────────
-      - name: Install dependencies
-        run: |
-          npm install -g @capacitor/cli
-          npm init -y
-          npm install @capacitor/core @capacitor/android
+      # ── 3. Android SDK ────────────────────────────────────────────────────────
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      # ── 5. Create Capacitor config ───────────────────────────────────────────
-      - name: Create capacitor.config.json
+      # ── 4. Build Android project from scratch ─────────────────────────────────
+      - name: Create Android project structure
         run: |
-          cat > capacitor.config.json << 'EOF'
-          {
-            "appId": "com.furattv.app",
-            "appName": "FuratTV",
-            "webDir": "www",
-            "server": {
-              "androidScheme": "https"
-            },
-            "android": {
-              "allowMixedContent": true,
-              "captureInput": true,
-              "webContentsDebuggingEnabled": false
-            }
+          mkdir -p FuratApp/app/src/main/java/com/furattv/app
+          mkdir -p FuratApp/app/src/main/res/values
+          mkdir -p FuratApp/app/src/main/res/xml
+          mkdir -p FuratApp/app/src/main/assets/www
+          mkdir -p FuratApp/gradle/wrapper
+
+      # ── 5. Copy web assets ────────────────────────────────────────────────────
+      - name: Copy web assets
+        run: |
+          cp index.html FuratApp/app/src/main/assets/www/index.html
+          for f in *.json; do
+            [ -f "$f" ] && cp "$f" FuratApp/app/src/main/assets/www/ || true
+          done
+
+      # ── 6. AndroidManifest.xml ────────────────────────────────────────────────
+      - name: Create AndroidManifest.xml
+        run: |
+          cat > FuratApp/app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.furattv.app">
+
+              <!-- Internet permissions -->
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:label="@string/app_name"
+                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+                  android:usesCleartextTraffic="true"
+                  android:networkSecurityConfig="@xml/network_security_config"
+                  android:hardwareAccelerated="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|keyboardHidden|screenSize"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+              </application>
+          </manifest>
+          EOF
+
+      # ── 7. Network Security Config ────────────────────────────────────────────
+      - name: Create network_security_config.xml
+        run: |
+          cat > FuratApp/app/src/main/res/xml/network_security_config.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+              <base-config cleartextTrafficPermitted="true">
+                  <trust-anchors>
+                      <certificates src="system" />
+                      <certificates src="user" />
+                  </trust-anchors>
+              </base-config>
+          </network-security-config>
+          EOF
+
+      # ── 8. strings.xml ────────────────────────────────────────────────────────
+      - name: Create strings.xml
+        run: |
+          cat > FuratApp/app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">FuratTV</string>
+          </resources>
+          EOF
+
+      # ── 9. MainActivity.java ──────────────────────────────────────────────────
+      - name: Create MainActivity.java
+        run: |
+          cat > FuratApp/app/src/main/java/com/furattv/app/MainActivity.java << 'EOF'
+          package com.furattv.app;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.CookieManager;
+          import android.webkit.WebResourceRequest;
+          import android.view.Window;
+          import android.view.WindowManager;
+          import android.graphics.Color;
+          import android.net.http.SslError;
+          import android.webkit.SslErrorHandler;
+
+          public class MainActivity extends Activity {
+
+              private WebView webView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+                  getWindow().setFlags(
+                      WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                      WindowManager.LayoutParams.FLAG_FULLSCREEN
+                  );
+
+                  webView = new WebView(this);
+                  webView.setBackgroundColor(Color.BLACK);
+                  setContentView(webView);
+
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setAllowFileAccess(true);
+                  settings.setAllowContentAccess(true);
+                  settings.setAllowFileAccessFromFileURLs(true);
+                  settings.setAllowUniversalAccessFromFileURLs(true);
+                  settings.setLoadWithOverviewMode(true);
+                  settings.setUseWideViewPort(true);
+                  settings.setBuiltInZoomControls(false);
+                  settings.setDisplayZoomControls(false);
+                  settings.setSupportZoom(false);
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+                  settings.setUserAgentString(
+                      "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 FuratTV/1.0"
+                  );
+
+                  CookieManager cookieManager = CookieManager.getInstance();
+                  cookieManager.setAcceptCookie(true);
+                  cookieManager.setAcceptThirdPartyCookies(webView, true);
+
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                          view.loadUrl(request.getUrl().toString());
+                          return true;
+                      }
+
+                      @Override
+                      public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                          handler.proceed();
+                      }
+                  });
+
+                  webView.setWebChromeClient(new WebChromeClient());
+                  webView.loadUrl("file:///android_asset/www/index.html");
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (webView.canGoBack()) {
+                      webView.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              @Override
+              protected void onPause() {
+                  super.onPause();
+                  webView.onPause();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  webView.onResume();
+              }
           }
           EOF
 
-      # ── 6. Prepare www folder (web assets) ───────────────────────────────────
-      - name: Prepare web assets
+      # ── 10. app/build.gradle ──────────────────────────────────────────────────
+      - name: Create app/build.gradle
         run: |
-          mkdir -p www
-          # Copy index.html as main entry point
-          cp index.html www/index.html
-          # Copy JSON config files
-          cp *.json www/ 2>/dev/null || true
+          cat > FuratApp/app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+          }
 
-      # ── 7. Add Android platform ───────────────────────────────────────────────
-      - name: Add Android platform
+          android {
+              namespace 'com.furattv.app'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.furattv.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+                  }
+                  debug {
+                      debuggable true
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+      # ── 11. Root build.gradle ─────────────────────────────────────────────────
+      - name: Create root build.gradle
         run: |
-          npx cap add android
+          cat > FuratApp/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application' version '8.2.0' apply false
+          }
+          EOF
 
-      # ── 8. Sync web assets into Android ──────────────────────────────────────
-      - name: Sync Capacitor
+      # ── 12. settings.gradle ───────────────────────────────────────────────────
+      - name: Create settings.gradle
         run: |
-          npx cap sync android
+          cat > FuratApp/settings.gradle << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FuratTV"
+          include ':app'
+          EOF
 
-      # ── 9. Customize Android App Name & Package ───────────────────────────────
-      - name: Customize Android metadata
+      # ── 13. gradle-wrapper.properties ─────────────────────────────────────────
+      - name: Create gradle wrapper properties
         run: |
-          # App label in strings.xml
-          sed -i 's|<string name="app_name">.*</string>|<string name="app_name">FuratTV</string>|g' \
-            android/app/src/main/res/values/strings.xml || true
+          cat > FuratApp/gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
 
-      # ── 10. Make Gradle executable ────────────────────────────────────────────
-      - name: Grant Gradle execute permission
-        run: chmod +x android/gradlew
+      # ── 14. Setup Gradle ──────────────────────────────────────────────────────
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
 
-      # ── 11. Build Debug APK ───────────────────────────────────────────────────
+      # ── 15. Build APK ─────────────────────────────────────────────────────────
       - name: Build Debug APK
-        working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        working-directory: FuratApp
+        run: gradle assembleDebug --no-daemon --stacktrace
         env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
-      # ── 12. Upload APK artifact ───────────────────────────────────────────────
+      # ── 16. Rename APK ────────────────────────────────────────────────────────
+      - name: Rename APK
+        run: |
+          cp FuratApp/app/build/outputs/apk/debug/app-debug.apk FuratTV-v1.0.apk
+
+      # ── 17. Upload artifact ───────────────────────────────────────────────────
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FuratTV-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: FuratTV-APK
+          path: FuratTV-v1.0.apk
           retention-days: 30
 
-      # ── 13. (Optional) Create GitHub Release on tag push ─────────────────────
-      - name: Create Release
+      # ── 18. Release on tag ────────────────────────────────────────────────────
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/debug/app-debug.apk
-          name: FuratTV ${{ github.ref_name }}
+          files: FuratTV-v1.0.apk
+          name: "FuratTV ${{ github.ref_name }}"
           body: |
             ## FuratTV - إصدار ${{ github.ref_name }}
             تم بناء هذا الإصدار تلقائياً عبر GitHub Actions.
+            - دعم كامل للإنترنت HTTP/HTTPS
+            - دعم تشغيل الوسائط والـ IPTV
+            - دعم JavaScript كامل
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
